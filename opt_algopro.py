@@ -1,70 +1,93 @@
 import numpy as np
-import networkx as nx
-from collections import defaultdict
+from heapq import heappush, heappop
 
-def cal_all_pairs_minimax_path_matrix_optimized(distance_matrix):
-    N = len(distance_matrix)
-    all_pairs_minimax_matrix = np.zeros((N, N))
-    MST = construct_MST_from_graph_optimized(distance_matrix)
-    edges_with_weights = [(u, v, d['weight']) for u, v, d in MST.edges(data=True)]
-    sorted_edges = sorted(edges_with_weights, key=lambda x: x[2], reverse=True)
-    parent = list(range(N))
-    rank = [0] * N
+class UnionFind:
+    def __init__(self, size):
+        self.parent = list(range(size))
+        self.rank = [0] * size
     
-    def find(x):
-        if parent[x] != x:
-            parent[x] = find(parent[x])
-        return parent[x]
+    def find(self, x):
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
     
-    def union(x, y):
-        px, py = find(x), find(y)
+    def union(self, x, y):
+        px, py = self.find(x), self.find(y)
         if px == py:
             return
-        if rank[px] < rank[py]:
+        if self.rank[px] < self.rank[py]:
             px, py = py, px
-        parent[py] = px
-        if rank[px] == rank[py]:
-            rank[px] += 1
-    
-    components = defaultdict(set)
-    for i in range(N):
-        components[i].add(i)
-    
-    for edge in sorted_edges:
-        u, v, weight = edge
-        comp_u = find(u)
-        comp_v = find(v)
-        
-        for node1 in components[comp_u]:
-            for node2 in components[comp_v]:
-                all_pairs_minimax_matrix[node1, node2] = weight
-                all_pairs_minimax_matrix[node2, node1] = weight
-        
-        smaller_comp = comp_u if len(components[comp_u]) < len(components[comp_v]) else comp_v
-        larger_comp = comp_v if smaller_comp == comp_u else comp_u
-        components[larger_comp].update(components[smaller_comp])
-        del components[smaller_comp]
-        union(u, v)
-    
-    return all_pairs_minimax_matrix
+        self.parent[py] = px
+        if self.rank[px] == self.rank[py]:
+            self.rank[px] += 1
 
-def construct_MST_from_graph_optimized(distance_matrix):
+def dfs(adj_list, start, visited):
+    """DFS implementation to match NetworkX behavior"""
+    stack = [start]
+    component = []
+    while stack:
+        node = stack.pop()
+        if node not in visited:
+            visited.add(node)
+            component.append(node)
+            stack.extend(sorted([n for n in adj_list[node] if n not in visited], reverse=True))
+    return component
+
+def construct_MST_edges(distance_matrix):
+    """Construct MST edges using Kruskal's algorithm"""
     N = len(distance_matrix)
-    G = nx.Graph()
-    rows, cols = np.triu_indices(N, k=1)
-    weights = distance_matrix[rows, cols]
-    edges = list(zip(rows, cols, weights))
-    G.add_weighted_edges_from(edges)
-    return nx.minimum_spanning_tree(G)
-
-def verify_minimax_path_matrix(original_matrix, result_matrix):
-    N = len(original_matrix)
+    edges = []
+    
+    # Create edge list
     for i in range(N):
         for j in range(i + 1, N):
-            paths = nx.all_simple_paths(nx.Graph(original_matrix), i, j)
-            min_max_weight = float('inf')
-            for path in paths:
-                path_max_weight = max(original_matrix[path[k]][path[k+1]] for k in range(len(path)-1))
-                min_max_weight = min(min_max_weight, path_max_weight)
-            assert abs(result_matrix[i][j] - min_max_weight) < 1e-10, f"Mismatch at ({i},{j}): got {result_matrix[i][j]}, expected {min_max_weight}"
-    return True
+            heappush(edges, (distance_matrix[i][j], i, j))
+    
+    # Build MST using Union-Find
+    uf = UnionFind(N)
+    mst_edges = []
+    adj_list = [[] for _ in range(N)]
+    
+    while edges and len(mst_edges) < N - 1:
+        weight, u, v = heappop(edges)
+        if uf.find(u) != uf.find(v):
+            mst_edges.append((u, v, weight))
+            adj_list[u].append(v)
+            adj_list[v].append(u)
+            uf.union(u, v)
+    
+    return mst_edges, adj_list
+
+def optimized_minimax_paths(distance_matrix):
+    """Optimized version of Algorithm 4"""
+    N = len(distance_matrix)
+    result = np.zeros((N, N))
+    
+    # Get MST edges and adjacency list
+    mst_edges, adj_list = construct_MST_edges(distance_matrix)
+    
+    # Sort edges by weight in descending order
+    mst_edges.sort(key=lambda x: x[2], reverse=True)
+    
+    # Process edges in descending order
+    for u, v, weight in mst_edges:
+        # Remove edge from adjacency list
+        adj_list[u].remove(v)
+        adj_list[v].remove(u)
+        
+        # Find components using DFS
+        visited = set()
+        tree1_nodes = dfs(adj_list, u, visited)
+        tree2_nodes = dfs(adj_list, v, visited)
+        
+        # Update minimax values
+        for p1 in tree1_nodes:
+            for p2 in tree2_nodes:
+                result[p1][p2] = weight
+                result[p2][p1] = weight
+    
+    return result
+
+def validate_results(matrix1, matrix2):
+    """Compare results between two algorithms"""
+    return np.allclose(matrix1, matrix2)
