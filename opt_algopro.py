@@ -87,7 +87,3 @@ def optimized_minimax_paths(distance_matrix):
                 result[p2][p1] = weight
     
     return result
-
-def validate_results(matrix1, matrix2):
-    """Compare results between two algorithms"""
-    return np.allclose(matrix1, matrix2)
